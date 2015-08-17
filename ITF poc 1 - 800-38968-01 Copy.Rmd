@@ -1,0 +1,450 @@
+---
+title: "ITF POC"
+author: "yisi"
+date: "July 27, 2015"
+output: html_document
+---
+
+A separate function just to allow you to check whether a package is installed
+```{r}
+EnsurePackage <- function(packageName)
+{
+  x <- as.character(packageName)
+  if(!require(x, character.only = TRUE))
+  {
+    install.packages(pkgs = x, 
+                     repos = "http://cran.r-project.org")
+    require(x, character.only = TRUE)
+  }
+} 
+
+```
+
+install the packages & library
+```{r}
+#data.table package will allow you to read files fast & delete unecessary lines & allow you to use fread(), which lets you skip lines/rows
+#this is a vital package to have for this progrma particularly
+EnsurePackage('data.table') 
+library(data.table)
+
+#or the following (used this one instead)
+EnsurePackage('xlsx')
+library('xlsx')
+
+#following package allows you to convert table format (long to wide, and vice versa)
+EnsurePackage('tidyr')
+library(tidyr)
+
+#following package is useful to use methods such as filter, summarize, etc
+EnsurePackage('dplyr')
+library('dplyr')
+
+#this package will handle date & times
+library('chron')
+
+#allows u to use ddplyr
+library('plyr')
+
+```
+
+
+clean up the data (for booking)
+1. read the booking file which already has TAN booking
+2. reorder by CBD in ascending order
+3. get rid of the time clock (hour and minute)
+
+```{r}
+## 1. read file named TANed booking, which contains all the booking data for all diff TAN's (already mapped by Chenelle; couldnt map it myself b/c the files i got are already mapped)
+path <- "~/cisco/LAS project w Suman/ITF/data files/"
+bkRaw <- read.csv(paste(path,'arvind Order Report.csv',sep=''), header = TRUE, sep=',', check.names = TRUE)
+
+
+#filter out the columns so you only keep the ones you need to use
+bkRaw <- bkRaw[, c("Product.ID", "Cisco.Booked.Date", "Request.Date", "Promise.Date", "Ordered.Quantity")]
+
+#rename the product.ID column to just PID
+colnames(bkRaw)[colnames(bkRaw) == "Product.ID"] <- "PID"
+
+#get rid of all the missing values (empty cells)
+bkRaw <- bkRaw[complete.cases(bkRaw),]
+
+
+```
+
+another way to filter columns out if you know what columsn you want to drop
+#get rid of sales order column; we dont need that
+dropCol <- 'Sales.Order.Number'
+
+#TAN3 = the 3rd TAN we chose to analyze
+bkTAN3 <- bkTAN %>%
+  filter(grepl("^800-38968", TAN)) %>%
+  select(which(!(colnames(bkTAN) %in% dropCol)))
+  
+
+1. read the TAN - PID mapping and so you can map your booking data to TAN
+
+```{r}
+## 1. read file named TANed booking, which contains all the booking data for all diff TAN's (already mapped by Chenelle; couldnt map it myself b/c the files i got are already mapped)
+path <- "~/cisco/LAS project w Suman/ITF/data files/"
+TANtoPID <- read.csv(paste(path,'PID to TAN to PF mapping.csv',sep=''), header = TRUE, sep=',', check.names = TRUE)
+
+#filter to read only the important columns
+TANtoPID <- TANtoPID[, c("PID", "CHILD", "PF.Lead.Time")]
+
+#the current file has TAN column name "CHILD", so get rid of the name and replace w "TAN"
+colnames(TANtoPID)[colnames(TANtoPID) == "CHILD"] <- "TAN"
+```
+
+
+consolidate the TAN to PID mapping to the booking file
+and also reorder the file
+```{r}
+##2. merge the two data frames (tables)
+bkTAN <- merge( bkRaw, TANtoPID, by = "PID", all = TRUE)
+
+#again, rid of empty cells
+#get rid of all the missing values (empty cells)
+#first convert all empty cells to NA, then use complete.cases
+bkTAN[bkTAN == ''] <- NA
+bkTAN <- bkTAN[complete.cases(bkTAN),]
+bkTAN$orig.Ordered.Qty <- bkTAN$Ordered.Quantity
+
+#reorder the columns
+bkTAN <- bkTAN[, c("TAN", "PID", "PF.Lead.Time", "Cisco.Booked.Date", "Request.Date", "Promise.Date", "orig.Ordered.Qty", "Ordered.Quantity")]
+
+bkTANclean <- bkTAN
+
+#to reorder the book date data, must convert the time from 12 hour format to 24 hour format first
+bkTANclean$Cisco.Booked.Date <- as.character(strptime(bkTANclean$Cisco.Booked.Date, "%m/%d/%Y %I:%M:%S %p"))
+#the time format at the end must match the input time format
+
+## reorder the CBD in ascending chronological order by date and minute
+#one way to reorder is to use "order" fxn and operate on dta.frame bkRaw:
+#bkRaw <- bkRaw[order(as.character.Date(bkRaw$Cisco.Booked.Date), decreasing = FALSE, na.last = TRUE),]
+#however, it's much faster and memory efficient to use setorder fxn on data.table bkRaw; also this set order using the reference, not a copy; so its like a hardset
+bkTANclean <- setorder(data.table(bkTANclean), "Cisco.Booked.Date")
+
+
+##  rid of clock time in CBD
+#bkTANclean$Cisco.Booked.Date <- gsub(pattern = '[AP]M$', replacement = '', x = bkTANclean$Cisco.Booked.Date)
+bkTANclean$Cisco.Booked.Date <- gsub(pattern = '[0-9]+:[0-9]+:[0-9]+$', replacement = '', x = bkTANclean$Cisco.Booked.Date)
+#also have to change the booked date format to with slash instead of with hyphen
+bkTANclean$Cisco.Booked.Date <- gsub(pattern = '-', replacement = "/", x = bkTANclean$Cisco.Booked.Date)
+bkTANclean$Cisco.Booked.Date <- chron(bkTANclean$Cisco.Booked.Date, format = "y/m/d", out.format = 'm/d/y')
+
+
+
+```
+
+
+
+
+```{r}
+# #filter the data to contain only the ones that begin w 800-38968
+# bkTAN3 <- subset(bkTAN, grepl("^800-38968", bkTAN$TAN))
+
+# #now that you are left w only important columns (the ones you actually care bout); check if there's any empty spaces, and rid of those; to do so, convert all blank spaces into NA
+# bkTAN3clean <- bkTAN3
+# bkTAN3clean[bkTAN3clean == ''] <- NA
+
+# #then get rid of all the NA's (since now you've already converted all blank spaces into NA, this way you can get rid of blanks and NA's at same time, if there's any NA's before you converted blanks into NA's)
+# bkTAN3clean <- bkTAN3clean %>% 
+#   filter(!(rowSums(is.na(bkTAN3clean)) >= 1)) 
+
+
+#convert all date factors into date format, so we can do some calculation and find other important dates
+#also must convert to data.frame.... otherwise won't do and IDK WHYYYYYYY QQ
+bkTANwCalc <- data.frame(bkTANclean)
+bkTANwCalc[, grepl("Date$", colnames(bkTANwCalc))] <- as.character.Date(bkTANwCalc[, grepl(pattern = "Date$", colnames(bkTANwCalc))])
+
+#calculate LT goal
+bkTANwCalc$LTgoal <- chron(bkTANwCalc$Cisco.Booked.Date) + bkTANwCalc$PF.Lead.Time
+#the chron function will allow us to use mathematical operations such as addition and subtraction by days on the dates characters
+
+
+#assign flags for whether CRD is within LT goal
+bkTANwCalc$CRDinLTflag <- ifelse( chron(bkTANwCalc$Request.Date) > bkTANwCalc$LTgoal, 'outside LT', 'within LT')
+
+
+#calculate current LAS hit
+#so if CRD <= LT, then LAS hit (LAS = 0) when PD > LT; if CRD > LT, then LAS hit when PD > CRD
+bkTANwCalc$LASnow <- ifelse( bkTANwCalc$CRDinLTflag == 'yes', ifelse( chron(bkTANwCalc$Promise.Date) > chron(bkTANwCalc$LTgoal), 0, 100), ifelse( chron(bkTANwCalc$Promise.Date) > chron(bkTANwCalc$Request.Date), 0, 100) )
+
+
+```
+
+
+#can use following method to check if the date is a holiday or weekend
+is.weekend(x)
+is.holiday(x, holidays)
+is.weekend(testDate)
+
+bkTAN3converted <- bkTAN3clean %>%
+  chron(as.character(subset(bkTAN3clean, select = grepl("Date$", colnames(bkTAN3clean)))))
+
+
+
+now work on supply file
+1. read supply image 
+```{r}
+#1. read the supply file
+path <- "~/cisco/LAS project w Suman/ITF/data files/"
+suppOriginal <- read.csv(paste(path,'7-30 suman ATP SUPPLY.csv',sep=''), header = TRUE, sep=',', check.names = TRUE)
+
+#reorganize the orders of the columns; and also select only the ones that interest you
+suppReOrg <- suppOriginal[, c("TAN", "Org", "Due.Date", "Quantity", "Type")]
+
+#since the original date formate for due date is in word and comma, e.g. June 18, 2015
+#and chron doesnt read that format, first need to get rid of the comma in the date string, and then it becomes a format that chron can read; however, sitll need to convert the data type to character first (original classified as factor by R by default)
+suppReOrg$Due.Date <- gsub(pattern = ',', replacement = '', x = suppReOrg$Due.Date)
+suppReOrg$Due.Date <- chron(as.character(suppReOrg$Due.Date), format = 'month day year', out.format = 'm/d/y')
+
+#duplicate the quantity column in supply image to save the original quantity and so you can compare the values later
+suppReOrg$Orig.Qty <- suppReOrg$Quantity
+
+```
+
+
+
+
+now seperate booking & supply data by TAN into diff data frames in a list
+```{r}
+#1. initialize transid pad to 2 days ITC
+TP <- 2
+ATP.ITF.pad <- 7
+bkByTAN <- list()
+suppByTAN <- list()
+
+#find out the unique values of TAN and set them into a vector
+TANvals <- as.character(unique(bkTAN$TAN))
+
+
+##now comes the monster code.... where you need 2 for loops, 1 to iterate through the master list (4 tans in this case), one to iterate through all the request date in each data.frame of the list
+
+
+for(j in 1: length(TANvals)){
+  print(paste('j = ', j))
+  #first separate all booking and supply data by TAN into diff data.frames
+  bkByTAN[[j]] <- subset(bkTANwCalc, bkTANwCalc$TAN == TANvals[j])
+  suppByTAN[[j]] <- subset(suppReOrg, suppReOrg$TAN == TANvals[j])
+  
+  #aggregate the supply image by due.date
+  suppByTAN[[j]] <- aggregate(Quantity ~ Due.Date + Orig.Qty, FUN = sum, data = suppByTAN[[j]])
+}
+
+testbk <- bkByTAN[[1]]
+testsup <- suppByTAN[[1]]
+
+  
+for(j in 1: length(TANvals)){
+  print(paste('j = ', j))
+  #to iterate through all individual TANs
+
+  for(i in 1:length(bkByTAN[[j]]$Request.Date)){
+    j<-1
+    i<-7
+    print(paste('i = ', i))
+    if (chron(bkByTAN[[j]]$Request.Date[i]) <= chron(bkByTAN[[j]]$LTgoal[i])){
+      #if CRD <= LT
+      if ( chron(bkByTAN[[j]]$Request.Date[i]) <= chron(bkByTAN[[j]]$Cisco.Booked.Date[i]) + TP){
+      #if CRD <= LT & CRD <= CBD + TP
+        #also gotta make sure the first bucket to check is before booked date; backward looking
+        closestDateIndex <- which.min(chron(bkByTAN[[j]]$Cisco.Booked.Date[i]) - chron(suppByTAN[[j]]$Due.Date))
+        closestDateIndex <- ifelse(chron(bkByTAN[[j]]$Cisco.Booked.Date[i]) < suppByTAN[[j]]$Due.Date[closestDateIndex], closestDateIndex - 1, closestDateIndex)
+        #closestDateIndex <- which.min(abs(chron(bkByTAN[[j]]$Cisco.Booked.Date[i]) - chron(suppByTAN[[j]]$Due.Date)))
+        closestDate <- suppByTAN[[j]]$Due.Date[closestDateIndex]
+        closestDateIndexInitial <- closestDateIndex
+        
+        while(bkByTAN[[j]]$Ordered.Quantity[i] > 0){
+          
+          if (chron(bkByTAN[[j]]$Cisco.Booked.Date[i]) > chron(suppByTAN[[j]]$Due.Date[closestDateIndex])){
+            #if supply arrived before CBD
+            if (suppByTAN[[j]]$Quantity[closestDateIndex] >= testbk$Ordered.Quantity[i]){
+              #if supply is enough before CBD
+              #then PD = CBD + TP
+              testbk$newPD[i] <- as.character(dates(chron(testbk$Cisco.Booked.Date[i]) + TP)) 
+              #also update the supply image by subtracting the ordered qty
+              suppByTAN[[j]]$Quantity[closestDateIndex] <- suppByTAN[[j]]$Quantity[closestDateIndex] - testbk$Ordered.Quantity[i]
+              #and then also set ordered qty to 0
+              testbk$Ordered.Quantity[i] <- 0
+              print('CRD<=LT, CRD <= CBD, supply b4 CBD')
+            } else{
+              #if there's not enough supply in the nearest supply bucket before CBD
+              #then take out the quantity from the nearest backward bucket first; to do that, set that bucket supply to 0, and then subtract the available qty from the ordered qty
+              testbk$Ordered.Quantity[i] <- testbk$Ordered.Quantity[i] - suppByTAN[[j]]$Quantity[closestDateIndex]
+              suppByTAN[[j]]$Quantity[closestDateIndex] <- 0
+              endReached <- FALSE
+              
+              if(closestDateIndex > 0){
+                if(endReached == FALSE){
+                  #then go backward even further if you still have buckets to go
+                  closestDateIndex <- closestDateIndex - 1
+                } else{
+                  #go forward if you've already reached end of supply bucket
+                  closestDateIndex <- closestDateIndex + 1
+                }
+                print('closestDateIndex is still positive')
+              } else{
+                #otherwise, go forward to the next nearest bucket
+                endReached <- TRUE
+                closestDateIndex <- closestDateIndexInitial + 1
+                print('closestDateIndex = 0')
+              } #end of else: otherwise, go forward
+            } #end of else: if theres not enough supply in nearest supply bucket
+            
+            
+            
+          } else{
+            #if supply arrived after CBD but w/in LT
+            if (suppByTAN[[j]]$Quantity[closestDateIndex] >= bkByTAN[[j]]$Ordered.Quantity[i]){
+              #if supply is enough
+              bkByTAN[[j]]$newPD[i] <- dates(suppByTAN[[j]]$Due.Date[closestDateIndex])
+              bkByTAN[[j]]$newPD[i] <- ifelse(is.weekend(bkByTAN[[j]]$newPD[i]), bkByTAN[[j]]$newPD[i] +1, bkByTAN[[j]]$newPD[i])
+              suppByTAN[[j]]$Quantity[closestDateIndex] <- suppByTAN[[j]]$Quantity[closestDateIndex] - bkByTAN[[j]]$Ordered.Quantity[i]
+              bkByTAN[[j]]$Ordered.Quantity <- 0
+              print('CRD<=LT, CRD > CBD, CRD < LT, supply before CRD')
+            } else{
+            #if there's not enough supply in the nearest supply bucket
+              bkByTAN[[j]]$Ordered.Quantity[i] <- bkByTAN[[j]]$Ordered.Quantity[i] - suppByTAN[[j]]$Quantity[closestDateIndex]
+              suppByTAN[[j]]$Quantity[closestDateIndex] <- 0
+              closestDateIndex <- closestDateIndex + 1
+              print('CRD<=LT, CRD > CBD, CRD < LT, supply after CRD')
+            } #end of else: if there's not enough supply
+          } #end of else: if supply arrived after CBD but w/in LT
+        } #end of while loop for when order qty > 0  
+      } else{
+      #if CRD <= LT & CRD > CBD + TP
+        
+        #also gotta make sure the first bucket to check is after booked date; forward looking
+        closestDateIndex <- which.min(chron(bkByTAN[[j]]$Cisco.Booked.Date[i]) - chron(suppByTAN[[j]]$Due.Date))
+        closestDateIndex <- ifelse(chron(bkByTAN[[j]]$Cisco.Booked.Date[i]) < suppByTAN[[j]]$Due.Date[closestDateIndex], closestDateIndex + 1, closestDateIndex)
+        
+        #closestDateIndex <- which.min(abs(chron(bkByTAN[[j]]$Request.Date[i]) - chron(suppByTAN[[j]]$Due.Date)))
+        closestDate <- suppByTAN[[j]]$Due.Date[closestDateIndex]
+        #closestDateIndexInitial <- closestDateIndex
+  
+        if ((chron(bkByTAN[[j]]$Request.Date[i]) - TP) > chron(suppByTAN[[j]]$Due.Date[closestDateIndex])){
+          #if supply arrived before CRD - TP day
+          if (suppByTAN[[j]]$Quantity[closestDateIndex] >= bkByTAN[[j]]$Ordered.Quantity[i]){
+            #if supply is enough TP days before Request date
+            bkByTAN[[j]]$newPD[i] <- as.character(dates(chron(bkByTAN[[j]]$Request.Date[i])))
+            suppByTAN[[j]]$Quantity[closestDateIndex] <- suppByTAN[[j]]$Quantity[closestDateIndex] - bkByTAN[[j]]$Ordered.Quantity[i]
+            bkByTAN[[j]]$Ordered.Quantity[i] <- 0
+            print('CRD<=LT, CRD > CBD, supply b4 CRD - TP')
+          } else{
+            #if there's not enough supply in the nearest supply bucket TP days before CRD
+            
+            
+            
+            if(suppByTAN[[j]]$Due.Date[closestDateIndex] <= chron(bkByTAN[[j]]$LTgoal[i])){
+              #if the supply is given before LT
+              if( suppByTAN[[j]]$Quantity[i] > bkByTAN[[j]]$Ordered.Quantity[i]){
+                #if there is enough supply in this bucket
+                bkByTAN[[j]]$newPD[i] <- as.character(dates(chron(suppByTAN[[j]]$Due.Date[closestDateIndex]))) 
+                suppByTAN[[j]]$Quantity[closestDateIndex] <- suppByTAN[[j]]$Quantity[closestDateIndex] - bkByTAN[[j]]$Ordered.Quantity[i]
+                bkByTAN[[j]]$Ordered.Quantity[i] <- 0
+                print('CRD<=LT, CRD > CBD, supply b4 LT after CRD')
+              } else {
+                #if there's not enough supply in the current bucket, subtract and keep look forward
+                bkByTAN[[j]]$Ordered.Quantity[i] <- bkByTAN[[j]]$Ordered.Quantity - suppByTAN[[j]]$Quantity[i]
+                suppByTAN[[j]]$Quantity[i] <- 0
+                closestDateIndex <- closestDateIndex + 1
+              }
+            }
+            
+            
+            
+            
+            else{
+              #if supply is given after LT
+              print('CRD<=LT, CRD > CBD, supply not enough before LT; order put on ITF + x days')
+              bkByTAN[[j]]$newPD[i] <- chron(bkByTAN[[j]]$LTgoal[i]) + ATP.ITF.pad
+            } # end of else: if supply is given after LT
+          } #end of else: if there's not enough supply in the nearest supply bucket TP days before CRD
+        } else{
+          #if supply arrived after CBD but w/in LT
+          
+          if (suppByTAN[[j]]$Quantity[closestDateIndex] >= bkByTAN[[j]]$Ordered.Quantity[i]){
+          #if supply is enough
+          bkByTAN[[j]]$newPD[i] <- as.character(dates(suppByTAN[[j]]$Due.Date[closestDateIndex]))  
+          suppByTAN[[j]]$Quantity[closestDateIndex] <- suppByTAN[[j]]$Quantity[closestDateIndex] - bkByTAN[[j]]$Ordered.Quantity[i]
+          bkByTAN[[j]]$Ordered.Quantity <- 0
+          print('CRD<=LT, CRD > CBD, CRD < LT, supply before CRD')
+          } else{
+            #if there's not enough supply in the nearest supply bucket
+            bkByTAN[[j]]$Ordered.Quantity[i] <- bkByTAN[[j]]$Ordered.Quantity - suppByTAN[[j]]$Quantity[closestDateIndex]
+            suppByTAN[[j]]$Quantity[closestDateIndex] <- 0
+            closestDateIndex <- closestDateIndex + 1
+            print('CRD<=LT, CRD > CBD, CRD < LT, supply after CRD')
+          } #end of else: if there's not enough supply in the nearest supply bucket
+        } #end of while: if supply arrived after CBD but w/in LT, ordered quantity is still not fulfilled (still positive order quantity value)
+    } #end of else: if CRD <= LT & CRD > CBD + TP
+  } else{
+    #if CRD > LT; set PD = CRD
+      bkByTAN[[j]]$newPD[i] <- bkByTAN[[j]]$Request.Date[i]
+      print('CRD > LT, PD = CRD')
+    } 
+    print(paste('closest supply date = ', closestDate, ' closest date index = ', closestDateIndex))
+  } #end of for loop that iterates through all the request dates in each data.frame of the list
+} #end of outer for loop that iterates through each TAN in the master TAN list
+testbk <- bkByTAN[[1]]
+testsup <- suppByTAN[[1]]
+  
+  #calculate for the new LAS for each ship
+ # bkByTAN[[j]]$newLAS[i] <- ifelse( chron(bkByTAN[[j]]$Request.Date[i]) > chron(bkByTAN[[j]]$LTgoal[i]), 100,                            ifelse( chron(bkByTAN[[j]]$newPD[i]) <= chron(bkByTAN[[j]]$LTgoal[i]), 100, 0))
+
+
+
+testbk <- bkByTAN[[1]]
+testsup <- suppByTAN[[1]]
+
+
+
+```
+
+
+
+```{r}
+
+
+```
+
+create a table that stores all the results for all TAN's
+```{r}
+#create a result table (temporary like this)
+#first put the TAN into the table
+result <- data.table(1,2,3)
+#then rename all the columns with following code
+names(result) <- c("TAN", "as-is LAS", "to-be LAS")
+
+#calculate for the as is LAS
+temp <- table(bkTAN3addInfo$LAS)
+asisLAS <- ifelse(is.na(temp['100']), 0, ifelse(is.na(temp['0']), 100, (temp['100'] / (temp['0'] + temp['100'])) * 100))
+
+#need to calculate for to be LAS.... shit
+temp <- table(testbk$newLAS)
+tobeLAS <- ifelse(is.na(temp['100']), 0, ifelse(is.na(temp['0']), 100, (temp['100'] / (temp['0'] + temp['100'])) * 100))
+
+#combine all 3 values
+row2badd <- list(as.character(bkTAN3addInfo$TAN[1]), asisLAS, tobeLAS)
+
+#finally modify the result table by row bind method
+result <- rbind(result, row2badd)
+
+```
+
+
+```{r}
+
+
+```
+
+
+```{r}
+
+
+```
+
+
+
+
