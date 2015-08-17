@@ -229,7 +229,7 @@ for(j in 1: length(TANvals)){
   suppByTAN[[j]] <- subset(suppReOrg, suppReOrg$TAN == TANvals[j])
   
   #aggregate the supply image by due.date
-  suppByTAN[[j]] <- aggregate(Quantity ~ Due.Date + Orig.Qty, FUN = sum, data = suppByTAN[[j]])
+  suppByTAN[[j]] <- ddply(suppByTAN[[j]], "Due.Date", numcolwise(sum))
 }
 
 testbk <- bkByTAN[[1]]
@@ -239,19 +239,19 @@ testsup <- suppByTAN[[1]]
 for(j in 1: length(TANvals)){
   print(paste('j = ', j))
   #to iterate through all individual TANs
-
+  
   for(i in 1:length(bkByTAN[[j]]$Request.Date)){
-    j<-1
-    i<-7
+     j<-1
+     # i<-7
     print(paste('i = ', i))
     if (chron(bkByTAN[[j]]$Request.Date[i]) <= chron(bkByTAN[[j]]$LTgoal[i])){
       #if CRD <= LT
       if ( chron(bkByTAN[[j]]$Request.Date[i]) <= chron(bkByTAN[[j]]$Cisco.Booked.Date[i]) + TP){
       #if CRD <= LT & CRD <= CBD + TP
         #also gotta make sure the first bucket to check is before booked date; backward looking
-        closestDateIndex <- which.min(chron(bkByTAN[[j]]$Cisco.Booked.Date[i]) - chron(suppByTAN[[j]]$Due.Date))
+        closestDateIndex <- which.min(abs(chron(bkByTAN[[j]]$Cisco.Booked.Date[i]) - suppByTAN[[j]]$Due.Date))
         closestDateIndex <- ifelse(chron(bkByTAN[[j]]$Cisco.Booked.Date[i]) < suppByTAN[[j]]$Due.Date[closestDateIndex], closestDateIndex - 1, closestDateIndex)
-        #closestDateIndex <- which.min(abs(chron(bkByTAN[[j]]$Cisco.Booked.Date[i]) - chron(suppByTAN[[j]]$Due.Date)))
+
         closestDate <- suppByTAN[[j]]$Due.Date[closestDateIndex]
         closestDateIndexInitial <- closestDateIndex
         
@@ -259,19 +259,19 @@ for(j in 1: length(TANvals)){
           
           if (chron(bkByTAN[[j]]$Cisco.Booked.Date[i]) > chron(suppByTAN[[j]]$Due.Date[closestDateIndex])){
             #if supply arrived before CBD
-            if (suppByTAN[[j]]$Quantity[closestDateIndex] >= testbk$Ordered.Quantity[i]){
+            if (suppByTAN[[j]]$Quantity[closestDateIndex] >= bkByTAN[[j]]$Ordered.Quantity[i]){
               #if supply is enough before CBD
               #then PD = CBD + TP
-              testbk$newPD[i] <- as.character(dates(chron(testbk$Cisco.Booked.Date[i]) + TP)) 
+              bkByTAN$newPD[i] <- as.character(chron(bkByTAN[[j]]$Cisco.Booked.Date[i]) + TP) 
               #also update the supply image by subtracting the ordered qty
-              suppByTAN[[j]]$Quantity[closestDateIndex] <- suppByTAN[[j]]$Quantity[closestDateIndex] - testbk$Ordered.Quantity[i]
+              suppByTAN[[j]]$Quantity[closestDateIndex] <- suppByTAN[[j]]$Quantity[closestDateIndex] - bkByTAN[[j]]$Ordered.Quantity[i]
               #and then also set ordered qty to 0
-              testbk$Ordered.Quantity[i] <- 0
+              bkByTAN[[j]]$Ordered.Quantity[i] <- 0
               print('CRD<=LT, CRD <= CBD, supply b4 CBD')
             } else{
               #if there's not enough supply in the nearest supply bucket before CBD
-              #then take out the quantity from the nearest backward bucket first; to do that, set that bucket supply to 0, and then subtract the available qty from the ordered qty
-              testbk$Ordered.Quantity[i] <- testbk$Ordered.Quantity[i] - suppByTAN[[j]]$Quantity[closestDateIndex]
+              #then take out the quantity from the nearest backward bucket first; to do that, subtract the available qty from the ordered qty, then set that bucket supply to 0
+              bkByTAN[[j]]$Ordered.Quantity[i] <- bkByTAN[[j]]$Ordered.Quantity[i] - suppByTAN[[j]]$Quantity[closestDateIndex]
               suppByTAN[[j]]$Quantity[closestDateIndex] <- 0
               endReached <- FALSE
               
@@ -301,7 +301,7 @@ for(j in 1: length(TANvals)){
               bkByTAN[[j]]$newPD[i] <- dates(suppByTAN[[j]]$Due.Date[closestDateIndex])
               bkByTAN[[j]]$newPD[i] <- ifelse(is.weekend(bkByTAN[[j]]$newPD[i]), bkByTAN[[j]]$newPD[i] +1, bkByTAN[[j]]$newPD[i])
               suppByTAN[[j]]$Quantity[closestDateIndex] <- suppByTAN[[j]]$Quantity[closestDateIndex] - bkByTAN[[j]]$Ordered.Quantity[i]
-              bkByTAN[[j]]$Ordered.Quantity <- 0
+              bkByTAN[[j]]$Ordered.Quantity[i] <- 0
               print('CRD<=LT, CRD > CBD, CRD < LT, supply before CRD')
             } else{
             #if there's not enough supply in the nearest supply bucket
@@ -316,10 +316,9 @@ for(j in 1: length(TANvals)){
       #if CRD <= LT & CRD > CBD + TP
         
         #also gotta make sure the first bucket to check is after booked date; forward looking
-        closestDateIndex <- which.min(chron(bkByTAN[[j]]$Cisco.Booked.Date[i]) - chron(suppByTAN[[j]]$Due.Date))
+        closestDateIndex <- which.min(abs(chron(bkByTAN[[j]]$Cisco.Booked.Date[i]) - suppByTAN[[j]]$Due.Date))
         closestDateIndex <- ifelse(chron(bkByTAN[[j]]$Cisco.Booked.Date[i]) < suppByTAN[[j]]$Due.Date[closestDateIndex], closestDateIndex + 1, closestDateIndex)
         
-        #closestDateIndex <- which.min(abs(chron(bkByTAN[[j]]$Request.Date[i]) - chron(suppByTAN[[j]]$Due.Date)))
         closestDate <- suppByTAN[[j]]$Due.Date[closestDateIndex]
         #closestDateIndexInitial <- closestDateIndex
   
@@ -368,11 +367,11 @@ for(j in 1: length(TANvals)){
           #if supply is enough
           bkByTAN[[j]]$newPD[i] <- as.character(dates(suppByTAN[[j]]$Due.Date[closestDateIndex]))  
           suppByTAN[[j]]$Quantity[closestDateIndex] <- suppByTAN[[j]]$Quantity[closestDateIndex] - bkByTAN[[j]]$Ordered.Quantity[i]
-          bkByTAN[[j]]$Ordered.Quantity <- 0
+          bkByTAN[[j]]$Ordered.Quantity[i] <- 0
           print('CRD<=LT, CRD > CBD, CRD < LT, supply before CRD')
           } else{
             #if there's not enough supply in the nearest supply bucket
-            bkByTAN[[j]]$Ordered.Quantity[i] <- bkByTAN[[j]]$Ordered.Quantity - suppByTAN[[j]]$Quantity[closestDateIndex]
+            bkByTAN[[j]]$Ordered.Quantity[i] <- bkByTAN[[j]]$Ordered.Quantity[i] - suppByTAN[[j]]$Quantity[closestDateIndex]
             suppByTAN[[j]]$Quantity[closestDateIndex] <- 0
             closestDateIndex <- closestDateIndex + 1
             print('CRD<=LT, CRD > CBD, CRD < LT, supply after CRD')
@@ -384,7 +383,7 @@ for(j in 1: length(TANvals)){
       bkByTAN[[j]]$newPD[i] <- bkByTAN[[j]]$Request.Date[i]
       print('CRD > LT, PD = CRD')
     } 
-    print(paste('closest supply date = ', closestDate, ' closest date index = ', closestDateIndex))
+    #print(paste('closest supply date = ', closestDate, ' closest date index = ', closestDateIndex))
   } #end of for loop that iterates through all the request dates in each data.frame of the list
 } #end of outer for loop that iterates through each TAN in the master TAN list
 testbk <- bkByTAN[[1]]
