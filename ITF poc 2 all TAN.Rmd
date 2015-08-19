@@ -5,6 +5,16 @@ date: "July 27, 2015"
 output: html_document
 ---
 
+user input values:
+please initialize all necessary constraints here
+```{r}
+#transit pad in days
+TP <- 2
+#atp itf pad in days
+ATP.ITF.pad <- 7
+```
+
+
 A separate function just to allow you to check whether a package is installed
 ```{r}
 EnsurePackage <- function(packageName)
@@ -140,18 +150,6 @@ bkTANclean$Cisco.Booked.Date <- chron(bkTANclean$Cisco.Booked.Date, format = "y/
 
 
 ```{r}
-# #filter the data to contain only the ones that begin w 800-38968
-# bkTAN3 <- subset(bkTAN, grepl("^800-38968", bkTAN$TAN))
-
-# #now that you are left w only important columns (the ones you actually care bout); check if there's any empty spaces, and rid of those; to do so, convert all blank spaces into NA
-# bkTAN3clean <- bkTAN3
-# bkTAN3clean[bkTAN3clean == ''] <- NA
-
-# #then get rid of all the NA's (since now you've already converted all blank spaces into NA, this way you can get rid of blanks and NA's at same time, if there's any NA's before you converted blanks into NA's)
-# bkTAN3clean <- bkTAN3clean %>% 
-#   filter(!(rowSums(is.na(bkTAN3clean)) >= 1)) 
-
-
 #convert all date factors into date format, so we can do some calculation and find other important dates
 #also must convert to data.frame.... otherwise won't do and IDK WHYYYYYYY QQ
 bkTANwCalc <- data.frame(bkTANclean)
@@ -163,25 +161,15 @@ bkTANwCalc$LTgoal <- chron(bkTANwCalc$Cisco.Booked.Date) + bkTANwCalc$PF.Lead.Ti
 
 
 #assign flags for whether CRD is within LT goal
-bkTANwCalc$CRDinLTflag <- ifelse( chron(bkTANwCalc$Request.Date) > bkTANwCalc$LTgoal, 'outside LT', 'within LT')
+bkTANwCalc$CRDinLTflag <- ifelse( chron(bkTANwCalc$Request.Date) > chron(bkTANwCalc$LTgoal), 'N', 'Y')
 
 
 #calculate current LAS hit
 #so if CRD <= LT, then LAS hit (LAS = 0) when PD > LT; if CRD > LT, then LAS hit when PD > CRD
-bkTANwCalc$LASnow <- ifelse( bkTANwCalc$CRDinLTflag == 'yes', ifelse( chron(bkTANwCalc$Promise.Date) > chron(bkTANwCalc$LTgoal), 0, 100), ifelse( chron(bkTANwCalc$Promise.Date) > chron(bkTANwCalc$Request.Date), 0, 100) )
+bkTANwCalc$LASnow <- ifelse( bkTANwCalc$CRDinLTflag == 'Y', ifelse( chron(bkTANwCalc$Promise.Date) > chron(bkTANwCalc$LTgoal), 0, 100), ifelse( chron(bkTANwCalc$Promise.Date) > chron(bkTANwCalc$Request.Date), 0, 100) )
 
 
 ```
-
-
-#can use following method to check if the date is a holiday or weekend
-is.weekend(x)
-is.holiday(x, holidays)
-is.weekend(testDate)
-
-bkTAN3converted <- bkTAN3clean %>%
-  chron(as.character(subset(bkTAN3clean, select = grepl("Date$", colnames(bkTAN3clean)))))
-
 
 
 now work on supply file
@@ -209,9 +197,7 @@ suppReOrg$Orig.Qty <- suppReOrg$Quantity
 
 now seperate booking & supply data by TAN into diff data frames in a list
 ```{r}
-#1. initialize transid pad to 2 days ITC
-TP <- 2
-ATP.ITF.pad <- 7
+#1. initialize the lists
 bkByTAN <- list()
 suppByTAN <- list()
 
@@ -261,6 +247,10 @@ for(j in 1: length(TANvals)){
             #if supply is enough before CBD
             #then PD = CBD + TP
             bkByTAN[[j]]$newPD[i] <- as.character(chron(bkByTAN[[j]]$Cisco.Booked.Date[i]) + TP) 
+            #gotta check if the new PD is on a weekend or not
+            bkByTAN[[j]]$newPD[i] <- ifelse(is.weekend(chron(bkByTAN[[j]]$newPD[i])), as.character(chron(bkByTAN[[j]]$newPD[i]) +1), bkByTAN[[j]]$newPD[i])
+            #need another one in case above one pushes the date from sat to sunday
+            bkByTAN[[j]]$newPD[i] <- ifelse(is.weekend(chron(bkByTAN[[j]]$newPD[i])), as.character(chron(bkByTAN[[j]]$newPD[i]) +1), bkByTAN[[j]]$newPD[i])
             #also update the supply image by subtracting the ordered qty
             suppByTAN[[j]]$Quantity[closestDateIndex] <- suppByTAN[[j]]$Quantity[closestDateIndex] - bkByTAN[[j]]$Ordered.Quantity[i]
             #and then also set ordered qty to 0
@@ -279,6 +269,9 @@ for(j in 1: length(TANvals)){
                 if(endReached == FALSE){
                 # backward looking has not reached end yet
                 bkByTAN[[j]]$newPD[i] <- as.character(chron(bkByTAN[[j]]$Cisco.Booked.Date[i]) + TP) 
+                #again, check if new PD is on wknd
+                bkByTAN[[j]]$newPD[i] <- ifelse(is.weekend(chron(bkByTAN[[j]]$newPD[i])), as.character(chron(bkByTAN[[j]]$newPD[i]) +1), bkByTAN[[j]]$newPD[i])
+                bkByTAN[[j]]$newPD[i] <- ifelse(is.weekend(chron(bkByTAN[[j]]$newPD[i])), as.character(chron(bkByTAN[[j]]$newPD[i]) +1), bkByTAN[[j]]$newPD[i])
                 #also update the supply image by subtracting the ordered qty
                 suppByTAN[[j]]$Quantity[closestDateIndex] <- suppByTAN[[j]]$Quantity[closestDateIndex] - bkByTAN[[j]]$Ordered.Quantity[i]
                 #and then also set ordered qty to 0
@@ -287,6 +280,8 @@ for(j in 1: length(TANvals)){
                 } else{
                   #backward looking has reached end 
                   bkByTAN[[j]]$newPD[i] <- as.character(suppByTAN[[j]]$Due.Date[closestDateIndex] + TP)
+                  bkByTAN[[j]]$newPD[i] <- ifelse(is.weekend(chron(bkByTAN[[j]]$newPD[i])), as.character(chron(bkByTAN[[j]]$newPD[i]) +1), bkByTAN[[j]]$newPD[i])
+                  bkByTAN[[j]]$newPD[i] <- ifelse(is.weekend(chron(bkByTAN[[j]]$newPD[i])), as.character(chron(bkByTAN[[j]]$newPD[i]) +1), bkByTAN[[j]]$newPD[i])
                   suppByTAN[[j]]$Quantity[closestDateIndex] <- suppByTAN[[j]]$Quantity[closestDateIndex] - bkByTAN[[j]]$Ordered.Quantity[i]
                   bkByTAN[[j]]$Ordered.Quantity[i] <- 0
                   print('backward looking has not reached end yet')
@@ -321,7 +316,8 @@ for(j in 1: length(TANvals)){
           if (suppByTAN[[j]]$Quantity[closestDateIndex] >= bkByTAN[[j]]$Ordered.Quantity[i]){
             #if supply is enough
             bkByTAN[[j]]$newPD[i] <- dates(suppByTAN[[j]]$Due.Date[closestDateIndex])
-            bkByTAN[[j]]$newPD[i] <- ifelse(is.weekend(bkByTAN[[j]]$newPD[i]), bkByTAN[[j]]$newPD[i] +1, bkByTAN[[j]]$newPD[i])
+            bkByTAN[[j]]$newPD[i] <- ifelse(is.weekend(chron(bkByTAN[[j]]$newPD[i])), as.character(chron(bkByTAN[[j]]$newPD[i]) +1), bkByTAN[[j]]$newPD[i])
+            bkByTAN[[j]]$newPD[i] <- ifelse(is.weekend(chron(bkByTAN[[j]]$newPD[i])), as.character(chron(bkByTAN[[j]]$newPD[i]) +1), bkByTAN[[j]]$newPD[i])
             suppByTAN[[j]]$Quantity[closestDateIndex] <- suppByTAN[[j]]$Quantity[closestDateIndex] - bkByTAN[[j]]$Ordered.Quantity[i]
             bkByTAN[[j]]$Ordered.Quantity[i] <- 0
             print('CRD<=LT, CRD > CBD, CRD < LT, supply before CRD')
@@ -352,6 +348,8 @@ for(j in 1: length(TANvals)){
             if (suppByTAN[[j]]$Quantity[closestDateIndex] >= bkByTAN[[j]]$Ordered.Quantity[i]){
               #if supply is enough TP days before Request date
               bkByTAN[[j]]$newPD[i] <- as.character(chron(bkByTAN[[j]]$Request.Date[i]))
+              bkByTAN[[j]]$newPD[i] <- ifelse(is.weekend(chron(bkByTAN[[j]]$newPD[i])), as.character(chron(bkByTAN[[j]]$newPD[i]) +1), bkByTAN[[j]]$newPD[i])
+              bkByTAN[[j]]$newPD[i] <- ifelse(is.weekend(chron(bkByTAN[[j]]$newPD[i])), as.character(chron(bkByTAN[[j]]$newPD[i]) +1), bkByTAN[[j]]$newPD[i])
               suppByTAN[[j]]$Quantity[closestDateIndex] <- suppByTAN[[j]]$Quantity[closestDateIndex] - bkByTAN[[j]]$Ordered.Quantity[i]
               bkByTAN[[j]]$Ordered.Quantity[i] <- 0
               print('CRD<=LT, CRD > CBD, supply b4 CRD - TP')
@@ -368,6 +366,8 @@ for(j in 1: length(TANvals)){
             if( suppByTAN[[j]]$Quantity[closestDateIndex] > bkByTAN[[j]]$Ordered.Quantity[i]){
               #if there is enough supply before LT - TP, then PD = Due.Date + TP
               bkByTAN[[j]]$newPD[i] <- as.character(chron(suppByTAN[[j]]$Due.Date[closestDateIndex]) + TP)
+              bkByTAN[[j]]$newPD[i] <- ifelse(is.weekend(chron(bkByTAN[[j]]$newPD[i])), as.character(chron(bkByTAN[[j]]$newPD[i]) +1), bkByTAN[[j]]$newPD[i])
+              bkByTAN[[j]]$newPD[i] <- ifelse(is.weekend(chron(bkByTAN[[j]]$newPD[i])), as.character(chron(bkByTAN[[j]]$newPD[i]) +1), bkByTAN[[j]]$newPD[i])
               suppByTAN[[j]]$Quantity[closestDateIndex] <- suppByTAN[[j]]$Quantity[closestDateIndex] - bkByTAN[[j]]$Ordered.Quantity[i]
               bkByTAN[[j]]$Ordered.Quantity[i] <- 0
               print('CRD<=LT, CRD > CBD, supply b4 LT after CRD')
@@ -380,6 +380,8 @@ for(j in 1: length(TANvals)){
           } else {
             #if no supply enough before LT - TP, meaning Due.Date > LT - TP, then we gotta put it on ITF + x
             bkByTAN[[j]]$newPD[i] <- as.character(chron(bkByTAN[[j]]$LTgoal) + ATP.ITF.pad)
+            bkByTAN[[j]]$newPD[i] <- ifelse(is.weekend(chron(bkByTAN[[j]]$newPD[i])), as.character(chron(bkByTAN[[j]]$newPD[i]) +1), bkByTAN[[j]]$newPD[i])
+            bkByTAN[[j]]$newPD[i] <- ifelse(is.weekend(chron(bkByTAN[[j]]$newPD[i])), as.character(chron(bkByTAN[[j]]$newPD[i]) +1), bkByTAN[[j]]$newPD[i])
             print("no enough supply before LT - TP; put on ITF + x")
           } # end of else
         } # end of while
@@ -388,10 +390,22 @@ for(j in 1: length(TANvals)){
   } else {
     #if CRD > LT; set PD = CRD
       bkByTAN[[j]]$newPD[i] <- bkByTAN[[j]]$Request.Date[i]
+      bkByTAN[[j]]$newPD[i] <- ifelse(is.weekend(chron(bkByTAN[[j]]$newPD[i])), as.character(chron(bkByTAN[[j]]$newPD[i]) +1), bkByTAN[[j]]$newPD[i])
+      bkByTAN[[j]]$newPD[i] <- ifelse(is.weekend(chron(bkByTAN[[j]]$newPD[i])), as.character(chron(bkByTAN[[j]]$newPD[i]) +1), bkByTAN[[j]]$newPD[i])
       print('CRD > LT, PD = CRD')
   } # end of else 
     #print(paste('closest supply date = ', closestDate, ' closest date index = ', closestDateIndex))
+    
+  #now calculate for the new LAS
+  bkByTAN[[j]]$newLAS[i] <- ifelse( bkByTAN[[j]]$CRDinLTflag[i] == 'Y', ifelse( chron(bkByTAN[[j]]$newPD[i]) <= chron(bkByTAN[[j]]$LTgoal[i]), 100, 0), ifelse( chron(bkByTAN[[j]]$newPD[i]) <= chron(bkByTAN[[j]]$Request.Date[i]), 100, 0) )
+    
   } #end of 2nd (inner) for loop that iterates through all the request dates in each data.frame of the list
+  
+  ##write to a xlsx file (the results)
+  path <- "~/cisco/LAS project w Suman/ITF/analysis/individual TAN/"
+  write.xlsx(bkByTAN[[j]], file = "C:/Users/ali3/Documents/cisco/LAS project w Suman/ITF/analysis/newPD newLAS.xlsx", sheetName = paste("TAN", j, sep = ""), col.names = TRUE, row.names = FALSE, append = TRUE)
+  #write.table(bkByTAN[[2]],file = paste(path, "newPD newLAS results2.csv", sep = ""), sep = ",")
+  
 } #end of 1st (outer) for loop that iterates through each TAN in the master TAN list
 testbk1 <- bkByTAN[[1]]
 testsup1 <- suppByTAN[[1]]
@@ -401,15 +415,6 @@ testbk3 <- bkByTAN[[3]]
 testsup3 <- suppByTAN[[3]]
 testbk4 <- bkByTAN[[4]]
 testsup4 <- suppByTAN[[4]]
-  
-  #calculate for the new LAS for each ship
- # bkByTAN[[j]]$newLAS[i] <- ifelse( chron(bkByTAN[[j]]$Request.Date[i]) > chron(bkByTAN[[j]]$LTgoal[i]), 100,                            ifelse( chron(bkByTAN[[j]]$newPD[i]) <= chron(bkByTAN[[j]]$LTgoal[i]), 100, 0))
-
-
-
-testbk <- bkByTAN[[1]]
-testsup <- suppByTAN[[1]]
-
 
 
 ```
@@ -429,19 +434,29 @@ result <- data.table(1,2,3)
 #then rename all the columns with following code
 names(result) <- c("TAN", "as-is LAS", "to-be LAS")
 
-#calculate for the as is LAS
-temp <- table(bkTAN3addInfo$LAS)
-asisLAS <- ifelse(is.na(temp['100']), 0, ifelse(is.na(temp['0']), 100, (temp['100'] / (temp['0'] + temp['100'])) * 100))
+for(j in 1:length(TANvals)){
+  #print(paste("j=", j, sep = ""))
+  #calculate for the as is LAS
+  temp1 <- table(bkByTAN[[j]]$LASnow)
+  asisLAS <- ifelse(is.na(temp1['100']), 0, ifelse(is.na(temp1['0']), 100, (temp1['100'] / (temp1['0'] + temp1['100'])) * 100))
+  
+  #need to calculate for to be LAS.... shit
+  temp2 <- table(bkByTAN[[j]]$newLAS)
+  tobeLAS <- ifelse(is.na(temp2['100']), 0, ifelse(is.na(temp2['0']), 100, (temp2['100'] / (temp2['0'] + temp2['100'])) * 100))
+  
+  #combine all 3 values
+  row2badd <- list(as.character(TANvals[j]), asisLAS, tobeLAS)
+  
+  #finally modify the result table by row bind method
+  result <- rbind(result, row2badd)
+}
 
-#need to calculate for to be LAS.... shit
-temp <- table(testbk$newLAS)
-tobeLAS <- ifelse(is.na(temp['100']), 0, ifelse(is.na(temp['0']), 100, (temp['100'] / (temp['0'] + temp['100'])) * 100))
+result <- result[-1, ]
 
-#combine all 3 values
-row2badd <- list(as.character(bkTAN3addInfo$TAN[1]), asisLAS, tobeLAS)
+##write the results table to the other TAN results sheets as well
+  path <- "~/cisco/LAS project w Suman/ITF/analysis/individual TAN/"
+  write.xlsx(result, file = "C:/Users/ali3/Documents/cisco/LAS project w Suman/ITF/analysis/newPD newLAS.xlsx", sheetName = "results table", col.names = TRUE, row.names = FALSE, append = TRUE)
 
-#finally modify the result table by row bind method
-result <- rbind(result, row2badd)
 
 ```
 
