@@ -244,12 +244,15 @@ TANvals <- as.character(unique(bkSDwCalc$TAN))
 
 ##now comes the monster code.... where you need 2 for loops, 1 to iterate through the master list (4 tans in this case), one to iterate through all the request date in each data.frame of the list
 
+# for(j in 1: length(TANvals)){
+#   suppByTAN[[j]]$Due.Date <- as.character(chron(suppByTAN[[j]]$Due.Date))
+# }
 
 for(j in 1: length(TANvals)){
   #print(paste('j = ', j))
   #first separate all booking and supply data by TAN into diff data.frames
-  bkByTAN[[j]] <- subset(bkSDwCalc, bkSDwCalc$TAN == TANvals[j])
-  suppByTAN[[j]] <- subset(suppReOrg, suppReOrg$TAN == TANvals[j])
+  bkByTAN[[j]] <- bkSDwCalc[bkSDwCalc$TAN == TANvals[j], ]
+  suppByTAN[[j]] <- suppReOrg[suppReOrg$TAN == TANvals[j], ]
   
   #aggregate the supply image by due.date
   suppByTAN[[j]] <- ddply(suppByTAN[[j]], "Due.Date", numcolwise(sum))
@@ -262,14 +265,16 @@ for(j in 1: length(TANvals)){
 for(j in 1: length(TANvals)){
   print(paste('j = ', j))
   #to iterate through all individual TANs
-
   for(i in 1:length(bkByTAN[[j]]$Requested.Ship.Date)){
-
     print(paste('i = ', i))
-    if (chron(bkByTAN[[j]]$Requested.Ship.Date[i]) <= bkByTAN[[j]]$LTgoal[i]){
-      #if CRD <= LT
+    
+    if (chron(bkByTAN[[j]]$Requested.Ship.Date[i]) <= chron(bkByTAN[[j]]$LTgoal[i]) - TP){
+      print('CRD<=LT')
+      print(bkByTAN[[j]]$Promise.Date[i])
+      #if CRD <= LT - TP
       if ( chron(bkByTAN[[j]]$Requested.Ship.Date[i]) <= chron(bkByTAN[[j]]$Cisco.Booked.Date[i]) + TP){
-      #if CRD <= LT & CRD <= CBD + TP
+        print('CRD <= CBD + TP')
+      #if CRD <= LT - TP & CRD <= CBD + TP
         #also gotta make sure the first bucket to check is before booked date; backward looking
         closestDateIndex <- which.min(abs(chron(bkByTAN[[j]]$Cisco.Booked.Date[i]) - suppByTAN[[j]]$Due.Date))
         closestDateIndex <- ifelse(chron(bkByTAN[[j]]$Cisco.Booked.Date[i]) < suppByTAN[[j]]$Due.Date[closestDateIndex], closestDateIndex - 1, closestDateIndex)
@@ -296,7 +301,7 @@ for(j in 1: length(TANvals)){
           } else{
             #if there's not enough supply in the nearest supply bucket before CBD
             endReached <- FALSE
-            #then take out the quantity from the nearest backward bucket first; to do that, subtract the available qty from the ordered qty, then set that bucket supply to 
+            #then take out the quantity from the nearest backward bucket first; to do that, subtract the available qty from the ordered qty, then set that bucket supply to 0
             
             while(bkByTAN[[j]]$Ordered.Quantity[i] > 0){
               print('while 1')
@@ -314,7 +319,7 @@ for(j in 1: length(TANvals)){
                 #and then also set ordered qty to 0
                 bkByTAN[[j]]$Ordered.Quantity[i] <- 0
                 
-                  } else{
+                } else{ #if endReached = TRUE
                   #backward looking has reached end 
                   bkByTAN[[j]]$newPD[i] <- as.character(suppByTAN[[j]]$Due.Date[closestDateIndex] + TP)
                   bkByTAN[[j]]$newPD[i] <- ifelse(is.weekend(chron(bkByTAN[[j]]$newPD[i])), as.character(chron(bkByTAN[[j]]$newPD[i]) +1), bkByTAN[[j]]$newPD[i])
@@ -375,7 +380,8 @@ for(j in 1: length(TANvals)){
         
         #update closestDateIndex to index to the supply date closest to CRD
         closestDateIndex <- which.min(abs((chron(bkByTAN[[j]]$Requested.Ship.Date[i]) - TP) - suppByTAN[[j]]$Due.Date))
-        closestDateIndex <- ifelse(chron(bkByTAN[[j]]$Requested.Ship.Date[i]) < suppByTAN[[j]]$Due.Date[closestDateIndex], closestDateIndex + 1, closestDateIndex)
+        closestDateIndex <- ifelse(chron(bkByTAN[[j]]$Requested.Ship.Date[i]) < suppByTAN[[j]]$Due.Date[closestDateIndex], closestDateIndex - 1, closestDateIndex)
+        #i had closestDateIndex + 1 before; now corrected (i think)
         
         closestDate <- suppByTAN[[j]]$Due.Date[closestDateIndex]
         closestDateIndexInitial <- closestDateIndex
@@ -450,14 +456,19 @@ for(j in 1: length(TANvals)){
   bkByTAN[[j]]$newOTS[i] <- ifelse( bkByTAN[[j]]$CRDinLTflag[i] == 'Y', ifelse( chron(bkByTAN[[j]]$Ship.Date[i]) <= bkByTAN[[j]]$LTgoal[i], 100, 0), ifelse( chron(bkByTAN[[j]]$Ship.Date[i]) <= chron(bkByTAN[[j]]$Requested.Ship.Date[i]), 100, 0) )
     
   } #end of 2nd (inner) for loop that iterates through all the request dates in each data.frame of the list
+#     testsup2 <- suppByTAN[[1]]
+#   testbk2 <- bkByTAN[[1]]
+  
+  #convert all Due.Date back to characters for readability
+  suppByTAN[[j]]$Due.Date <- as.character(chron(suppByTAN[[j]]$Due.Date))
   
   ##write to a xlsx file (the results)
   write.xlsx(bkByTAN[[j]], file = "C:/Users/ali3/Documents/cisco/LAS project w Suman/ITF/analysis/newPD newLAS 12 TANs.xlsx", sheetName = paste("TAN", j, sep = ""), col.names = TRUE, row.names = FALSE, append = TRUE)
   #write.table(bkByTAN[[2]],file = paste(path, "newPD newLAS results2.csv", sep = ""), sep = ",")
   
 } #end of 1st (outer) for loop that iterates through each TAN in the master TAN list
-# testbk1 <- bkByTAN[[1]]
-# testsup1 <- suppByTAN[[1]]
+testbk1 <- bkByTAN[[1]]
+testsup1 <- suppByTAN[[1]]
 # testbk2 <- bkByTAN[[2]]
 # testsup2 <- suppByTAN[[2]]
 # testbk3 <- bkByTAN[[3]]
