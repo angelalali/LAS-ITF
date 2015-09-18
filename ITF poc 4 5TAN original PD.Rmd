@@ -144,8 +144,7 @@ bkTAN$orig.Ordered.Qty <- bkTAN$Ordered.Quantity
 #get rid of all the rows with promise date after 8/31, which is the day arvind got his report
 #so anything with PD after this date, we dont have the actual ship date data; no use, so rid of
 retrieveDate <- '8/31/2015'
-bkSDvalid <- subset(bkTAN, chron(as.character(bkTAN$Promise.Date)) <= chron(as.character(retrieveDate)))
-#bkSDvalid = all the bookings for the valid Ship Dates (ship date already available, and not in the future)
+bkSDvalid <- subset(bkTAN, chron(as.character(bkTAN$Promise.Date)) < chron(as.character(retrieveDate)))
 
 
 # #reorder the columns
@@ -195,10 +194,10 @@ bkSDwCalc$CRDinLTflag <- ifelse( chron(bkSDwCalc$Requested.Ship.Date) > chron(bk
 
 #calculate current LAS hit
 #so if CRD <= LT, then LAS hit (LAS = 0) when PD > LT; if CRD > LT, then LAS hit when PD > CRD
-bkSDwCalc$LASnow <- ifelse( bkSDwCalc$CRDinLTflag == 'Y', ifelse( chron(bkSDwCalc$Promise.Date) > chron(bkSDwCalc$LTgoal), 0, 100), ifelse( chron(bkSDwCalc$Promise.Date) > chron(bkSDwCalc$Requested.Ship.Date), 0, 100) )
+bkSDwCalc$LASnow <- ifelse( bkSDwCalc$CRDinLTflag == 'Y', ifelse( chron(bkSDwCalc$Original.Promise.Date) > chron(bkSDwCalc$LTgoal), 0, 100), ifelse( chron(bkSDwCalc$Original.Promise.Date) > chron(bkSDwCalc$Requested.Ship.Date), 0, 100) )
 
 #calculate current OTS hit
-bkSDwCalc$OTSnow <- ifelse( bkSDwCalc$CRDinLTflag == 'Y', ifelse( chron(bkSDwCalc$Ship.Date) > chron(bkSDwCalc$LTgoal), 0, 100), ifelse( chron(bkSDwCalc$Ship.Date) > chron(bkSDwCalc$Promise.Date), 0, 100) )
+bkSDwCalc$OTSnow <- ifelse( bkSDwCalc$CRDinLTflag == 'Y', ifelse( chron(bkSDwCalc$Ship.Date) > chron(bkSDwCalc$LTgoal), 0, 100), ifelse( chron(bkSDwCalc$Ship.Date) > chron(bkSDwCalc$Original.Promise.Date), 0, 100) )
 
 ```
 
@@ -222,7 +221,7 @@ suppReOrg <- suppOriginal[, c("TAN", "Org", "Due.Date", "Quantity", "Type")]
 suppReOrg$Due.Date <- chron(as.character(suppReOrg$Due.Date))
 
 #convert quantity into numeric; right now its factor
-suppReOrg$Quantity <- as.numeric(suppReOrg$Quantity)
+suppReOrg$Quantity <- as.numeric(levels(suppReOrg$Quantity)[suppReOrg$Quantity])
 
 #duplicate the quantity column in supply image to save the original quantity and so you can compare the values later
 suppReOrg$Orig.Qty <- suppReOrg$Quantity
@@ -239,9 +238,9 @@ bkByTAN <- list()
 suppByTAN <- list()
 
 #find out the unique values of TAN and set them into a vector
-TANvals <- as.character(unique(bkSDwCalc$TAN))
+#TANvals <- as.character(unique(bkSDwCalc$TAN))
 #i'll hard code TAN's for now
-#TANvals <- c('37-1143-01', "69-2544-01" , "800-03191-01", "68-4697-02", "800-38968-01")
+TANvals <- c("68-4856-01","68-4697-02", "800-38968-01", "800-38502-01", "800-38513-01")
 
 ##now comes the monster code.... where you need 2 for loops, 1 to iterate through the master list (4 tans in this case), one to iterate through all the request date in each data.frame of the list
 
@@ -256,22 +255,21 @@ for(j in 1: length(TANvals)){
   suppByTAN[[j]] <- suppReOrg[suppReOrg$TAN == TANvals[j], ]
   
   #aggregate the supply image by due.date
-  suppByTAN[[j]] <- ddply(suppByTAN[[j]], "Due.Date", numcolwise(sum))
+  #suppByTAN[[j]] <- ddply(suppByTAN[[j]], "Due.Date", numcolwise(sum))
 }
 
-# testbk <- bkByTAN[[1]]
-# testsup <- suppByTAN[[1]]
+testbk <- bkByTAN[[1]]
+testsup <- suppByTAN[[1]]
 # names(testbk)
   
 for(j in 1: length(TANvals)){
   print(paste('j = ', j))
+  j<-1
   #to iterate through all individual TANs
   for(i in 1:length(bkByTAN[[j]]$Requested.Ship.Date)){
     print(paste('i = ', i))
     
     if (chron(bkByTAN[[j]]$Requested.Ship.Date[i]) <= chron(bkByTAN[[j]]$LTgoal[i]) - TP){
-      print('CRD<=LT')
-      print(bkByTAN[[j]]$Promise.Date[i])
       #if CRD <= LT - TP
       if ( chron(bkByTAN[[j]]$Requested.Ship.Date[i]) <= chron(bkByTAN[[j]]$Cisco.Booked.Date[i]) + TP){
         print('CRD <= CBD + TP')
@@ -464,7 +462,7 @@ for(j in 1: length(TANvals)){
   suppByTAN[[j]]$Due.Date <- as.character(chron(suppByTAN[[j]]$Due.Date))
   
   ##write to a xlsx file (the results)
-  write.xlsx(bkByTAN[[j]], file = "C:/Users/ali3/Documents/cisco/LAS project w Suman/ITF/analysis/newPD newLAS 12 TANs.xlsx", sheetName = paste("TAN", j, sep = ""), col.names = TRUE, row.names = FALSE, append = TRUE)
+  write.xlsx(bkByTAN[[j]], file = "C:/Users/ali3/Documents/cisco/LAS project w Suman/ITF/analysis/newPD newLAS new OTS 5 TANs.xlsx", sheetName = paste("TAN", j, sep = ""), col.names = TRUE, row.names = FALSE, append = TRUE)
   #write.table(bkByTAN[[2]],file = paste(path, "newPD newLAS results2.csv", sep = ""), sep = ",")
   
 } #end of 1st (outer) for loop that iterates through each TAN in the master TAN list
@@ -491,9 +489,10 @@ create a table that stores all the results for all TAN's
 ```{r}
 #create a result table (temporary like this)
 #first put the TAN into the table
-result <- data.table(1,2,3,4,5,6,7)
+result <- data.table(1,2,3,4,5,6,7,8)
 #then rename all the columns with following code
-names(result) <- c("TAN", "as-is LAS", "to-be LAS", 'change in LAS', 'as-is OTS', 'to-be OTS', 'change in OTS')
+#names(result) <- c("PF", "TAN", "as-is LAS", "to-be LAS", 'change in LAS', 'as-is OTS', 'to-be OTS', 'change in OTS')
+setnames(result, c("V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8"), c("PF", "TAN", "as-is LAS", "to-be LAS", 'change in LAS', 'as-is OTS', 'to-be OTS', 'change in OTS'))
 
 for(j in 1:length(TANvals)){
   #print(paste("j=", j, sep = ""))
@@ -520,17 +519,19 @@ for(j in 1:length(TANvals)){
   changeOTS <- tobeOTS - asisOTS
   
   #combine all 3 values
-  row2badd <- list(as.character(TANvals[j]), asisLAS, tobeLAS, changeLAS, asisOTS, tobeOTS, changeOTS)
+  row2badd <- list(bkByTAN[[j]][bkByTAN[[j]]$TAN == TANvals[j], ]$Prod.Family[1], as.character(TANvals[j]), asisLAS, tobeLAS, changeLAS, asisOTS, tobeOTS, changeOTS)
   
   #finally modify the result table by row bind method
   result <- rbind(result, row2badd)
 }
 
 result <- result[-1, ]
+row2badd <- list(" ", "average", mean(result$`as-is LAS`), mean(result$`to-be LAS`), mean(result$`change in LAS`), mean(result$`as-is OTS`), mean(result$`to-be OTS`), mean(result$`change in OTS`))
+result <- rbind(result, row2badd)
 
 ##write the results table to the other TAN results sheets as well
   path <- "~/cisco/LAS project w Suman/ITF/analysis/individual TAN/"
-  write.xlsx(result, file = "C:/Users/ali3/Documents/cisco/LAS project w Suman/ITF/analysis/newPD newLAS 12 TANs.xlsx", sheetName = "results table", col.names = TRUE, row.names = FALSE, append = TRUE)
+  write.xlsx(result, file = "C:/Users/ali3/Documents/cisco/LAS project w Suman/ITF/analysis/newPD newLAS new OTS 5 TANs.xlsx", sheetName = "results table", col.names = TRUE, row.names = FALSE, append = TRUE)
 
 
 ```
